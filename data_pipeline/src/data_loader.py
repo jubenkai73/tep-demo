@@ -88,7 +88,11 @@ def _load_chunked(path, retention_rate, random_state):
 
     chunks = []
     for chunk in pd.read_csv(path, chunksize=100000, dtype=OPTIMIZED_DTYPES):
-        chunk['unique_id'] = chunk['faultNumber'] * 1000 + chunk['simulationRun']
+        chunk['unique_id'] = (
+            chunk['faultNumber'].astype('int32') * 1000 +
+            chunk['simulationRun'].astype('int32')
+        )
+
         filtered = chunk[chunk['unique_id'].isin(selected_ids)].copy()
         chunks.append(filtered.drop(columns='unique_id'))
 
