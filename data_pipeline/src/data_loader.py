@@ -50,6 +50,8 @@ def load_dataset(file_name, retention_rate=0.5, random_state=42):
     if not target_path.exists():
         raise FileNotFoundError(f"❌ File not found: {target_path}")
 
+    print(f"✔️ Loading dataset '{file_name}' with a {retention_rate:.0%} retention rate")
+
     available_ram = get_available_memory()
     print(f"✔️ System/Container RAM Available: {available_ram:.2f} GB")
 
