@@ -11,29 +11,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Essential: Download code from the repository
+      # 1. Download the repository code to the runner
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Setup Python environment for unit testing
+      # 2. Set up the Python environment
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # 3. Install core dependencies for local validation
+      # 3. Install dependencies required for unit testing
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pytest pandas>=2.3.3 numpy>=1.26.4 scikit-learn joblib psutil
 
-      # 4. Run Unit Tests (Validates data_loader logic and fixes)
+      # 4. Run Unit Tests (Validates data_loader.py and logic fixes)
       - name: Run Unit Tests
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           python -m pytest tests/ -v
 
-      # 5. Setup Docker environment for the pipeline
+      # 5. Prepare Docker environment
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -44,29 +44,29 @@ jobs:
           echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_KEY }}"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
-      # 7. Execute Ingestion & Preprocessing
+      # 7. Execute Ingestion & Preprocessing via Docker Compose
       - name: Data Ingestion and Preprocessing
-        [cite_start]run: docker compose up --build downloader [cite: 1]
+        run: docker compose up --build downloader
 
-      # 8. Train Models (Detector & Diagnostician)
+      # 8. Execute Model Training
       - name: Model Training
-        [cite_start]run: docker compose up --build trainer [cite: 1]
+        run: docker compose up --build trainer
 
-      # 9. Performance Audit
+      # 9. Execute Performance Audit
       - name: Run Evaluation
-        [cite_start]run: docker compose up --build evaluator [cite: 1]
+        run: docker compose up --build evaluator
 
-      # 10. Display metrics in GitHub Logs
+      # 10. Display Audit Metrics in Logs
       - name: Display Audit Report
         run: |
           if [ -f data/models/audit_report.txt ]; then
             cat data/models/audit_report.txt
           else
-            echo "Audit report missing!"
+            echo "Audit report not found!"
             exit 1
           fi
 
-      # 11. Archive models as artifacts
+      # 11. Archive trained models as artifacts
       - name: Upload Trained Models
         uses: actions/upload-artifact@v4
         with:
