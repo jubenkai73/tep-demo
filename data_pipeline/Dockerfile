@@ -21,3 +21,5 @@ ENV PYTHONPATH=/app
 
 # Default command to run the pipeline
 CMD ["python", "run_pipeline.py"]
+
+# Force rebuild for integer fix
