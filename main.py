@@ -1,20 +1,40 @@
-from src.preprocessor import DataProcessor
-from src.config import RAW_DATA_PATH
+import sys
+import argparse
+#from pathlib import Path
+
+from src.preprocessing.downloader import DataDownloader
+from src.preprocessing.converter import DataConverter
+
+
+
+class MLPipeline:
+    """Orchestrateur du pipeline ML"""
+
+    def __init__(self):
+        """Initialise les composants du pipeline"""
+        self.downloader = DataDownloader()
+        self.converter = DataConverter()
+
+    def preprocess(self) -> int:
+
+            # Step 1: Download
+            print("Step 1/2: Downloading data from Kaggle")
+            self.downloader.download()
+
+            # Step 2: Convert
+            print("Step 2/2: Converting CSV to Parquet")
+            self.converter.convert_csv_to_parquet()
+
+            print("✔️ Preprocessing completed successfully")
+            return 0
 
 def main():
-    processor = DataProcessor()
+    # Initialize pipeline
+    pipeline = MLPipeline()
 
-    print("=== Download Test ===")
-    result = processor.download_csv()
-    print(f"Result: {result}")
+    # Execute preprocessing steps
+    pipeline.preprocess()
 
-    print(f"\n=== Verification ===")
-    print(f"Data exists: {RAW_DATA_PATH.exists()}")
-    if RAW_DATA_PATH.exists():
-        files = list(RAW_DATA_PATH.glob("*.csv"))
-        print(f"CSV files found: {len(files)}")
-        for f in files[:3]:  # Display first 3 files
-            print(f"  - {f.name}")
-
+# Assurez-vous d'ajouter cette ligne pour exécuter le script principal
 if __name__ == "__main__":
     main()
