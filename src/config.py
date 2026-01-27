@@ -24,7 +24,6 @@ for i in range(1, 42):
     OPTIMIZED_DTYPES[f"xmeas_{i}"] = "float32"
 for i in range(1, 12):
     OPTIMIZED_DTYPES[f"xmv_{i}"] = "float32"
-<<<<<<< HEAD
 
 # === Parquet File Paths ===
 FAULTY_PARQUET_PATH = PARQUET_DATA_PATH / "TEP_Faulty_Training.parquet"
@@ -43,5 +42,3 @@ PARQUET_FILES = [
     "TEP_Faulty_Testing.parquet",
     "TEP_Faulty_Training.parquet"
 ]
-=======
->>>>>>> origin/main
