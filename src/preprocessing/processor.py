@@ -13,82 +13,104 @@ from src.config import (
 
 
 class DataProcessor:
-    """Handles the data processing steps of the pipeline."""
+    """Orchestrates data transformation and consolidation within the Silver Layer.
 
-    def __init__(self):
-            # On crée une instance du DataLoader pour pouvoir utiliser ses méthodes
-            self.loader = DataLoader()
+    This class manages the lifecycle of raw-to-optimized data conversion and
+    merges distributed datasets into a unified master record for the training pipeline.
+    """
 
-    def convert_csv_to_parquet(self):
-        """Converts missing CSV files to Parquet with optimized data types.
+    def __init__(self) -> None:
+        """Initializes the DataProcessor with internal dependencies.
 
-        This method ensures that the destination directory exists, iterates over
-        the CSV files defined in your configuration, and converts them to Parquet
-        format only if they do not already exist.
+        The internal DataLoader instance is utilized for specialized data handling
+        methods if required during the processing lifecycle.
         """
-        # Ensure the destination directory exists
+        self.loader: DataLoader = DataLoader()
+
+    def convert_csv_to_parquet(self) -> None:
+        """Transmutes raw CSV artifacts into memory-efficient Parquet format.
+
+        This method enforces idempotency by validating the existence of source
+        files and skipping already processed artifacts. It applies optimized
+        schema dtypes during ingestion to minimize RAM footprint.
+
+        Returns:
+            None: Logs operational status and conversion metrics to stdout.
+        """
+        # Enforce filesystem integrity for the Silver Layer
         RAW_PARQUET_DIR.mkdir(parents=True, exist_ok=True)
 
-        converted_count = 0
+        converted_count: int = 0
 
-        # Iterate over the CSV files defined in your configuration
+        # Iterative ingestion of defined raw artifacts
         for csv_name in RAW_CSV_FILES:
-            csv_path = RAW_DATA_PATH / csv_name
-            # Generate the corresponding Parquet file name (e.g., .csv -> .parquet)
-            parquet_name = csv_name.replace(".csv", ".parquet")
-            parquet_path = RAW_PARQUET_DIR / parquet_name
+            csv_path: Path = RAW_DATA_PATH / csv_name
+            parquet_name: str = csv_name.replace(".csv", ".parquet")
+            parquet_path: Path = RAW_PARQUET_DIR / parquet_name
 
-            # Step 1: Check if the source CSV file exists
+            # Pre-flight check: Source existence
             if not csv_path.exists():
-                print(f"⚠️ Source file not found: {csv_name}")
+                print(f"⚠️ Source artifact missing: {csv_name}")
                 continue
 
-            # Step 2: Check if the Parquet file already exists
+            # Idempotency check: Skip existing optimized files
             if parquet_path.exists():
-                print(f"⏩ Already converted: {parquet_name}")
+                print(f"⏩ Already optimized: {parquet_name}")
                 continue
 
-            # Step 3: Convert if necessary
+            # Atomic conversion process
             try:
-                df = pd.read_csv(csv_path, dtype=OPTIMIZED_DTYPES)
+                # Optimized read with pre-defined schema dtypes
+                df: pd.DataFrame = pd.read_csv(csv_path, dtype=OPTIMIZED_DTYPES)
                 df.to_parquet(parquet_path, engine="pyarrow", index=False)
-                print(f"✅ {csv_name} → {parquet_name}")
+                print(f"✅ Optimized: {csv_name} → {parquet_name}")
                 converted_count += 1
             except Exception as e:
-                print(f"❌ Error during conversion of {csv_name}: {e}")
+                print(f"❌ Transformation failure for {csv_name}: {e}")
 
         if converted_count == 0:
-            print("✅ All files are already up to date")
+            print("✅ Silver Layer is fully synchronized")
         else:
-            print(f"🏁 Conversion completed: {converted_count} new file(s) created.")
+            print(f"🏁 Processing cycle complete: {converted_count} artifact(s) generated.")
 
-    def merge_faulty_and_normal_data(self):
-        """Merges Faulty and Normal datasets into a single master file."""
-        # Step 1: Check if the merged file already exists
+    def merge_faulty_and_normal_data(self) -> pd.DataFrame:
+        """Consolidates discrete training sets into a unified Silver Master record.
+
+        Resolves class imbalances by labeling normal data and ensures data
+        persistence in a high-performance Parquet format.
+
+        Returns:
+            pd.DataFrame: The consolidated dataset containing both normal and faulty records.
+
+        Raises:
+            FileNotFoundError: If upstream Parquet dependencies are missing.
+        """
+        # Guard clause: Return existing artifact to avoid redundant compute
         if MERGED_FILE_PATH.exists():
-            print(f"✅ The merged file already exists: {MERGED_FILE_PATH.name}")
+            print(f"✅ Master record detected: {MERGED_FILE_PATH.name}")
             return pd.read_parquet(MERGED_FILE_PATH)
 
-        # Step 2: Load the source files using pandas directly
-        print(f"📖 Loading: {FAULTY_PARQUET_PATH.name}")
-        faulty_df = pd.read_parquet(FAULTY_PARQUET_PATH)
+        # Loading upstream artifacts via PyArrow engine
+        print(f"📖 Ingesting: {FAULTY_PARQUET_PATH.name}")
+        faulty_df: pd.DataFrame = pd.read_parquet(FAULTY_PARQUET_PATH)
 
-        print(f"📖 Loading: {NORMAL_PARQUET_PATH.name}")
-        normal_df = pd.read_parquet(NORMAL_PARQUET_PATH)
+        print(f"📖 Ingesting: {NORMAL_PARQUET_PATH.name}")
+        normal_df: pd.DataFrame = pd.read_parquet(NORMAL_PARQUET_PATH)
 
         if normal_df.empty and faulty_df.empty:
-            print("❌ Error: No source data to merge.")
+            print("❌ Critical Error: Source dataframes are empty. Aborting merge.")
             return pd.DataFrame()
 
-        # Step 3: Merge and save
-        print("🔗 Merging datasets...")
+        # Data Harmonization: Assigning baseline class (0) to normal observations
+        print("🔗 Vertical concatenation in progress...")
         if "faultNumber" not in normal_df.columns:
             normal_df["faultNumber"] = 0
 
-        merged_df = pd.concat([normal_df, faulty_df], axis=0, ignore_index=True)
+        # Master dataset generation
+        merged_df: pd.DataFrame = pd.concat([normal_df, faulty_df], axis=0, ignore_index=True)
 
-        # Save the final merged file
+        # Persistent storage for downstream Gold Layer processing
         merged_df.to_parquet(MERGED_FILE_PATH, engine="pyarrow", index=False)
-        print(f"✅ Merging completed and saved to: {MERGED_FILE_PATH.name}")
+        print(f"✅ Consolidated record saved: {MERGED_FILE_PATH.name}")
 
         return merged_df

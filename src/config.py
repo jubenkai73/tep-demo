@@ -5,8 +5,14 @@ import os
 # GLOBAL PIPELINE CONFIGURATION
 # =============================================================================
 
-# Number of simulations to retain for development (set to None for full dataset)
-DEFAULT_N_SIMULATIONS = 10
+# Controls dataset volume
+DEFAULT_N_SIMULATIONS = 10  # None for full-scale training (500 runs).
+
+# Standard hold-out validation split ratio
+DEFAULT_TEST_SIZE = 0.2  # 20% for testing, 80% for training
+
+# Ensures reproducibility by freezing the stochastic processes
+RANDOM_SEED = 42
 
 # =============================================================================
 # PROJECT FILESYSTEM ORCHESTRATION

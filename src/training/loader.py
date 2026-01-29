@@ -1,69 +1,139 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from sklearn.utils import shuffle
 from src.config import (
-    PARQUET_DATA_PATH,
-    PROCESSED_DATA_PATH,
-    DEFAULT_N_SIMULATIONS,
+    RAW_PARQUET_DIR,
+    SUBSETS_DIR,
+    FINAL_SPLIT_DIR,
     MERGED_FILE_PATH,
-    N_SIMU_FILE_PATH
+    DEFAULT_N_SIMULATIONS,
+    DEFAULT_TEST_SIZE,
+    RANDOM_SEED
 )
 
 class DataLoader:
-    """Charge et prépare les données pour l'entraînement"""
+    """Orchestrates data ingestion, subsampling, and leakage-proof splitting strategies.
 
-    def __init__(self, data_path=None):
-        self.data_path = Path(data_path) if data_path else PARQUET_DATA_PATH
+    This service ensures that the TEP dataset is processed with strict adherence to
+    experimental integrity, specifically preventing data leakage by handling
+    simulation runs as atomic units.
+    """
 
-    def load_data(self, file_path=MERGED_FILE_PATH, n_simulations=DEFAULT_N_SIMULATIONS):
+    def __init__(self, data_path: str | Path | None = None) -> None:
+        """Initializes the DataLoader with a specific or default filesystem context.
+
+        Args:
+            data_path (str | Path | None): Optional root path for parquet artifacts.
+                Defaults to RAW_PARQUET_DIR if None.
         """
-        Charge les données et applique un sous-échantillonnage si demandé.
+        # Logical path resolution for the data source
+        self.data_path: Path = Path(data_path) if data_path else RAW_PARQUET_DIR
+
+    def load_data(self, n_simulations: int = DEFAULT_N_SIMULATIONS) -> pd.DataFrame:
+        """Loads data from local cache or generates a new subset from the master record.
+
+        Args:
+            n_simulations (int): Target number of simulation runs to retain per fault.
+
+        Returns:
+            pd.DataFrame: The processed dataset with an added 'unique_run_id' for tracking.
+
+        Raises:
+            FileNotFoundError: If the upstream Silver Layer (merged file) is missing.
         """
-        # Utilise le chemin passé en argument ou celui par défaut
-        path = Path(file_path) if file_path else self.data_path
+        subset_path: Path = SUBSETS_DIR / f"TEP_subset_N{n_simulations}.parquet"
 
-        if path is None or not path.exists():
-            raise FileNotFoundError(f"❌ Chemin invalide : {path}")
+        if subset_path.exists():
+            print(f"⚡ Ingesting cached subset: {subset_path.name}")
+            df: pd.DataFrame = pd.read_parquet(subset_path)
+        else:
+            print(f"📖 Generating fresh subset from Gold Master record...")
+            if not MERGED_FILE_PATH.exists():
+                raise FileNotFoundError(f"❌ Master artifact missing at: {MERGED_FILE_PATH}")
 
-        print(f"📖 Chargement de : {path.name}...")
-        df = pd.read_parquet(path)
+            df: pd.DataFrame = pd.read_parquet(MERGED_FILE_PATH)
+            if n_simulations:
+                df = self._subsample_by_run(df, n_simulations)
+                # Persist the subset to minimize expensive I/O in future iterations
+                df.to_parquet(subset_path, index=False)
 
-        # Si n_simulations est précisé, on réduit le dataset
-        if n_simulations is not None:
-            df = self._subsample_by_run(df, n_simulations)
+        # Generate a composite key to ensure grouping integrity during train/test split
+        df['unique_run_id'] = df['faultNumber'].astype(str) + "_" + df['simulationRun'].astype(str)
+        return df
 
-        # Save the final merged file
-        df.to_parquet(N_SIMU_FILE_PATH, engine="pyarrow", index=False)
-        print(f"✅ Merging completed and saved to: {N_SIMU_FILE_PATH.name}")
+    def split_by_run(
+        self,
+        df: pd.DataFrame,
+        test_size: float = DEFAULT_TEST_SIZE
+    ) -> tuple[tuple[pd.DataFrame, pd.Series], tuple[pd.DataFrame, pd.Series]]:
+        """Executes a stratified split based on simulation runs to prevent data leakage.
 
-        # Séparation classique X (features) et y (target)
-        # On exclut les colonnes de métadonnées pour l'entraînement
-        metadata_cols = ['faultNumber', 'simulationRun', 'sample']
-        X = df.drop(columns=metadata_cols)
-        y = df['faultNumber']
+        By splitting on 'unique_run_id' rather than individual observations, we ensure
+        that temporal patterns from a single simulation do not appear in both sets.
 
+        Args:
+            df (pd.DataFrame): The source dataframe containing 'unique_run_id'.
+            test_size (float): The proportion of the dataset to include in the test split.
+
+        Returns:
+            tuple: A nested tuple containing ((X_train, y_train), (X_test, y_test)).
+        """
+        unique_runs: np.ndarray = shuffle(df['unique_run_id'].unique(), random_state=RANDOM_SEED)
+        split_idx: int = int(len(unique_runs) * (1 - test_size))
+
+        train_runs: np.ndarray = unique_runs[:split_idx]
+
+        # Sectorization into training and evaluation sets
+        df_train: pd.DataFrame = df[df['unique_run_id'].isin(train_runs)].copy()
+        df_test: pd.DataFrame = df[~df['unique_run_id'].isin(train_runs)].copy()
+
+        return self._finalize_split(df_train), self._finalize_split(df_test)
+
+    def _finalize_split(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+        """De-couples features from labels and prunes operational metadata.
+
+        Args:
+            df (pd.DataFrame): The raw split segment.
+
+        Returns:
+            tuple[pd.DataFrame, pd.Series]: A tuple containing (Features, Target).
+        """
+        metadata: list[str] = ['faultNumber', 'simulationRun', 'sample', 'unique_run_id']
+        cols_to_drop: list[str] = [c for c in metadata if c in df.columns]
+
+        X: pd.DataFrame = df.drop(columns=cols_to_drop)
+        y: pd.Series = df['faultNumber']
         return X, y
 
-    def _subsample_by_run(self, df, n_simulations=DEFAULT_N_SIMULATIONS):
-        """
-        Logique interne pour filtrer par simulationRun.
-        """
-        print(f"📉 Réduction à {n_simulations} simulations par type de défaut...")
+    def _subsample_by_run(self, df: pd.DataFrame, n_simulations: int) -> pd.DataFrame:
+        """Filters the dataset to preserve a fixed quota of simulations per fault class.
 
-        # Ajout de include_groups=False pour éviter le Warning
-        return (
-            df.groupby('faultNumber')
-            .apply(
-                lambda x: x[x['simulationRun'].isin(x['simulationRun'].unique()[:n_simulations])],
-                include_groups=False
-            )
-            .reset_index(level=0) # On remet 'faultNumber' qui a été déplacé dans l'index
-            .reset_index(drop=True)
+        Args:
+            df (pd.DataFrame): The full master dataset.
+            n_simulations (int): Number of unique runs to keep per faultNumber.
+
+        Returns:
+            pd.DataFrame: A downsampled dataframe.
+        """
+        print(f"📉 Downsampling to {n_simulations} simulations per fault class...")
+        mask: pd.Series = df.groupby('faultNumber')['simulationRun'].transform(
+            lambda x: x.isin(np.unique(x)[:n_simulations])
         )
+        return df[mask].reset_index(drop=True)
 
-    def save_test_set(self, df_test):
-        """Sauvegarde le test set pour évaluation ultérieure"""
-        PROCESSED_DATA_PATH.mkdir(parents=True, exist_ok=True)
-        output_path = PROCESSED_DATA_PATH / "test_set.parquet"
+    def save_test_set(self, X_test: pd.DataFrame, y_test: pd.Series) -> None:
+        """Serializes the final test set to the Gold Layer for model evaluation.
+
+        Args:
+            X_test (pd.DataFrame): Evaluation features.
+            y_test (pd.Series): Evaluation ground truth labels.
+        """
+        output_path: Path = FINAL_SPLIT_DIR / "test_set_final.parquet"
+
+        df_test: pd.DataFrame = X_test.copy()
+        df_test['target'] = y_test.values
+
+        # Final archival of the Gold Standard test set
         df_test.to_parquet(output_path, index=False)
-        print(f"✔️ Test set saved: {output_path}")
+        print(f"✅ Gold Standard test set archived: {output_path}")

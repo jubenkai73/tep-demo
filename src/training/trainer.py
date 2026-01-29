@@ -43,7 +43,7 @@ class ModelTrainer:
         # Sauvegarde
         model_path = MODEL_PATH / "tep_detector.pkl"
         joblib.dump(self.detector, model_path)
-        print(f"✔️ Detector saved: {model_path}")
+        print(f"✅ Detector saved: {model_path}")
 
     def train_diagnostician(self, df_train):
         """

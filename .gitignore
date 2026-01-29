@@ -33,3 +33,5 @@ data/models/*.txt
 
 # Data and Models
 backup/
+
+*.parquet
