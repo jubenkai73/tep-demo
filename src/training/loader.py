@@ -48,7 +48,7 @@ class DataLoader:
             print(f"⚡ Ingesting cached subset: {subset_path.name}")
             df: pd.DataFrame = pd.read_parquet(subset_path)
         else:
-            print(f"📖 Generating fresh subset from Gold Master record...")
+            print("📖 Generating fresh subset from Gold Master record...")
             if not MERGED_FILE_PATH.exists():
                 raise FileNotFoundError(f"❌ Master artifact missing at: {MERGED_FILE_PATH}")
 

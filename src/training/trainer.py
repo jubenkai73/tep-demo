@@ -1,98 +1,123 @@
 import joblib
+import pandas as pd
 from pathlib import Path
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from src.config import MODEL_PATH
-from src.data_loader import DataLoader
-
+from sklearn.ensemble import RandomForestClassifier
+from src.config import (
+    MODEL_DIR,
+    MODEL_DETECT_NAME,
+    MODEL_DIAG_NAME,
+    DETECTOR_PARAMS,
+    DIAGNOSTICIAN_PARAMS
+)
 
 class ModelTrainer:
-    """Entraîne les modèles de détection et diagnostic"""
+    """Orchestrates the training of a cascaded model architecture.
 
-    def __init__(self):
-        self.loader = DataLoader()
-        MODEL_PATH.mkdir(parents=True, exist_ok=True)
-        self.detector = None
-        self.diagnostician = None
+    This class handles a two-stage classification pipeline:
+    1. Binary Detection (Normal vs. Anomaly).
+    2. Multiclass Diagnosis (Fault identification).
+    It implements idempotency features to skip training if artifacts already exist.
+    """
 
-    def train_detector(self, df_train):
+    def __init__(self) -> None:
+        """Initializes the trainer and ensures the model repository exists.
+
+        The initialization ensures the MODEL_DIR exists on the filesystem
+        to prevent downstream FileNotFoundError during serialization.
         """
-        Entraîne le détecteur binaire (Normal vs Faulty)
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        self.detector_path: Path = MODEL_DIR / MODEL_DETECT_NAME
+        self.diagnostician_path: Path = MODEL_DIR / MODEL_DIAG_NAME
+        self.detector: Pipeline | None = None
+        self.diagnostician: Pipeline | None = None
+
+    def train_cascaded_models(self, df_train: pd.DataFrame, force: bool = False) -> None:
+        """Executes the hierarchical training lifecycle for the cascade architecture.
 
         Args:
-            df_train: DataFrame d'entraînement
+            df_train (pd.DataFrame): Training dataset containing features and 'faultNumber'.
+            force (bool): If True, overrides existing artifacts and re-runs training.
+                Defaults to False.
+
+        Returns:
+            None: Artifacts are persisted directly to the filesystem.
         """
-        print("✔️ Training Fault Detector")
+        # --- Idempotency Check ---
+        # Short-circuit the execution if models are already present to save compute resources
+        if not force and self.detector_path.exists() and self.diagnostician_path.exists():
+            print(f"\n⏭️  MODELS EXIST: Found in {MODEL_DIR}")
+            print("⏭️  Skipping training phase to optimize pipeline execution")
+            print("💡 Pass 'force=True' to override existing artifacts")
+            return
 
-        X_train, _ = self.loader.split_X_y(df_train, drop_metadata=True)
-        y_train_binary = (df_train['faultNumber'] > 0).astype(int)
+        # ==========================================
+        # 🛡️ PHASE 1 : THE DETECTOR (Binary)
+        # ==========================================
+        if force or not self.detector_path.exists():
+            print("\n▶ PHASE 1: Training DETECTOR (Binary Anomaly Detection)")
 
-        self.detector = Pipeline([
-            ('scaler', StandardScaler()),
-            ('rf', RandomForestClassifier(
-                n_estimators=50,
-                max_depth=10,
-                n_jobs=-1,
-                random_state=42
-            ))
-        ])
+            # Binary label mapping: 0 = Normal, 1 = Any Fault type
+            y_train_binary: pd.Series = (df_train['faultNumber'] > 0).astype(int)
+            X_train: pd.DataFrame = self._prepare_features(df_train)
 
-        self.detector.fit(X_train, y_train_binary)
+            self.detector = Pipeline([
+                ('scaler', StandardScaler()),
+                ('classifier', RandomForestClassifier(**DETECTOR_PARAMS))
+            ])
 
-        # Sauvegarde
-        model_path = MODEL_PATH / "tep_detector.pkl"
-        joblib.dump(self.detector, model_path)
-        print(f"✅ Detector saved: {model_path}")
+            self.detector.fit(X_train, y_train_binary)
+            self._save_model(self.detector, MODEL_DETECT_NAME)
+        else:
+            print(f"✅ DETECTOR: Artifact already exists at {MODEL_DETECT_NAME}.")
 
-    def train_diagnostician(self, df_train):
-        """
-        Entraîne le diagnosticien multi-classe (identification de la panne)
+        # ==========================================
+        # 🕵️ PHASE 2 : THE DIAGNOSTICIAN (Multiclass)
+        # ==========================================
+        if force or not self.diagnostician_path.exists():
+            print("\n▶ PHASE 2: Training DIAGNOSTICIAN (Fault Classification)")
+
+            # Filter training set: Diagnostician only learns from faulty patterns
+            mask_faulty: pd.Series = df_train['faultNumber'] > 0
+            df_train_faulty: pd.DataFrame = df_train[mask_faulty]
+
+            X_train_diag: pd.DataFrame = self._prepare_features(df_train_faulty)
+            y_train_diag: pd.Series = df_train_faulty['faultNumber']
+
+            self.diagnostician = Pipeline([
+                ('scaler', StandardScaler()),
+                ('classifier', RandomForestClassifier(**DIAGNOSTICIAN_PARAMS))
+            ])
+
+            self.diagnostician.fit(X_train_diag, y_train_diag)
+            self._save_model(self.diagnostician, MODEL_DIAG_NAME)
+        else:
+            print(f"✅ DIAGNOSTICIAN: Artifact already exists at {MODEL_DIAG_NAME}.")
+
+    def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Prunes metadata and target columns to isolate model features.
 
         Args:
-            df_train: DataFrame d'entraînement
+            df (pd.DataFrame): Input dataframe with raw sensors and metadata.
+
+        Returns:
+            pd.DataFrame: Cleaned dataframe containing only training features.
         """
-        print("✔️ Training Fault Diagnostician")
+        metadata: list[str] = ['faultNumber', 'simulationRun', 'sample', 'unique_run_id']
+        cols_to_drop: list[str] = [c for c in metadata if c in df.columns]
+        return df.drop(columns=cols_to_drop)
 
-        # Seulement les données avec pannes
-        df_faulty = df_train[df_train['faultNumber'] > 0]
-        X_diag, y_diag = self.loader.split_X_y(df_faulty, drop_metadata=True)
+    def _save_model(self, model: Pipeline, filename: str) -> None:
+        """Serializes the trained scikit-learn pipeline to disk.
 
-        self.diagnostician = Pipeline([
-            ('scaler', StandardScaler()),
-            ('rf', RandomForestClassifier(
-                n_estimators=100,
-                max_depth=20,
-                n_jobs=-1,
-                random_state=42
-            ))
-        ])
+        Args:
+            model (Pipeline): The fitted estimator/pipeline to persist.
+            filename (str): Target filename within the MODEL_DIR.
 
-        self.diagnostician.fit(X_diag, y_diag)
-
-        # Sauvegarde
-        model_path = MODEL_PATH / "tep_diagnostician.pkl"
-        joblib.dump(self.diagnostician, model_path)
-        print(f"✔️ Diagnostician saved: {model_path}")
-
-    def train_all(self, retention_rate=0.02, test_size=0.2):
-        """Pipeline d'entraînement complet"""
-
-        # 1. Chargement
-        df = self.loader.load_parquet()
-
-        # 2. Split train/test
-        df_train, df_test = self.loader.train_test_split(
-            df,
-            retention_rate=retention_rate,
-            test_size=test_size
-        )
-
-        # 3. Sauvegarde test set
-        self.loader.save_test_set(df_test)
-
-        # 4. Entraînement des modèles
-        self.train_detector(df_train)
-        self.train_diagnostician(df_train)
-
-        print("✔️ Training complete")
+        Returns:
+            None
+        """
+        save_path: Path = MODEL_DIR / filename
+        joblib.dump(model, save_path)
+        print(f"📦 Artifact persisted: {save_path.name}")

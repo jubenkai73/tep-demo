@@ -1,16 +1,18 @@
 import sys
-from pathlib import Path
+import pandas as pd
 from src.preprocessing.downloader import DataDownloader
 from src.preprocessing.processor import DataProcessor
 from src.training.loader import DataLoader
+from src.training.trainer import ModelTrainer
 
 class MLPipeline:
     """Orchestrates the ML pipeline."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.downloader = DataDownloader()
         self.processor = DataProcessor()
         self.loader = DataLoader()
+        self.trainer = ModelTrainer()
 
     def preprocess(self) -> int:
         """Exécute la partie ETL (Extract, Transform, Load)."""
@@ -37,36 +39,35 @@ class MLPipeline:
         print("="*70)
 
         # --- Step 1 : Chargement intelligent ---
-        # Retourne le DataFrame complet (avec les colonnes de run pour le split)
         print("\n▶ STEP 1: Loading Data (with cache check)")
         df = self.loader.load_data()
 
         # --- Step 2 : Split Train/Test par Run ---
-        # C'est ici que l'étanchéité des données est garantie
         print("▶ STEP 2: Splitting Data by Run (Avoid Leakage)")
-        (X_train, y_train), (X_test, y_test) = self.loader.split_by_run(df, test_size=0.2)
+        (X_train, y_train), (X_test, y_test) = self.loader.split_by_run(df)
 
-        print(f"✅ Data split completed:")
+        print("✅ Data split completed:")
         print(f"   - Train set: {X_train.shape[0]} samples")
         print(f"   - Test set:  {X_test.shape[0]} samples")
         print(f"📊 Features: {X_train.shape[1]} sensors")
 
         # --- Step 3 : Sauvegarde du Test Set ---
-        # Utile pour évaluer tes futurs modèles sur une base fixe
         print("\n▶ STEP 3: Archiving Test Set")
         self.loader.save_test_set(X_test, y_test)
 
         # --- Step 4 : Training  ---
-        print("\n▶ STEP 4: Model Training")
+        print("\n▶ STEP 4: Model Training (Cascaded Models)")
 
-        print("... Training logic to be implemented ...")
+        # Reconstruction du DataFrame pour le trainer (qui gère ses propres filtres)
+        df_train_ready = pd.concat([X_train, y_train], axis=1)
+        self.trainer.train_cascaded_models(df_train_ready, force=False)
 
         print("\n" + "="*70)
         print("✅ PIPELINE COMPLETED")
         print("="*70)
         return 0
 
-def main():
+def main() -> int:
     pipeline = MLPipeline()
     try:
         pipeline.preprocess()
@@ -75,7 +76,7 @@ def main():
     except Exception as e:
         print(f"\n❌ Error during pipeline execution: {e}", file=sys.stderr)
         import traceback
-        traceback.print_exc() # Aide à voir où ça plante précisément
+        traceback.print_exc()
         return 1
 
 if __name__ == "__main__":

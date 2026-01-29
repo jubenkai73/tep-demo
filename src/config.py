@@ -1,107 +1,139 @@
+"""
+Project Configuration Module
+----------------------------
+Handles filesystem orchestration, model hyperparameters, and data lifecycle paths
+using a Medallion Architecture pattern (Bronze/Silver/Gold).
+"""
+
 from pathlib import Path
 import os
 
 # =============================================================================
-# GLOBAL PIPELINE CONFIGURATION
+# FILESYSTEM RESOLUTION (INFRASTRUCTURE AS CODE)
 # =============================================================================
 
-# Controls dataset volume
-DEFAULT_N_SIMULATIONS = 10  # None for full-scale training (500 runs).
+# Root directory discovery: Locates the 'tep-demo' base folder
+# Optimized using __file__ to ensure path resolution works across different environments
+PROJ_ROOT: Path = Path(__file__).resolve().parent.parent
 
-# Standard hold-out validation split ratio
-DEFAULT_TEST_SIZE = 0.2  # 20% for testing, 80% for training
-
-# Ensures reproducibility by freezing the stochastic processes
-RANDOM_SEED = 42
-
-# =============================================================================
-# PROJECT FILESYSTEM ORCHESTRATION
-# =============================================================================
-
-# Root directory resolution
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.getenv("DATA_PATH", BASE_DIR / "data"))
+# Data storage root: Support for Environment Variable override (Cloud-native readiness)
+DATA_DIR: Path = Path(os.getenv("DATA_PATH", PROJ_ROOT / "data"))
 
 # Configuration and state persistence
-CONFIG_DIR = BASE_DIR / "config"
-CACHE_CONFIG_PATH = CONFIG_DIR / "cache.yaml"
+CONFIG_DIR: Path = PROJ_ROOT / "config"
+CACHE_CONFIG_PATH: Path = CONFIG_DIR / "cache.yaml"
 
-# Metadata and artifact storage
-LOGS_DIR = BASE_DIR / "logs"
-MODELS_DIR = BASE_DIR / "models"
+# Logging and Artifact storage
+LOGS_DIR: Path = PROJ_ROOT / "logs"
+MODEL_DIR: Path = PROJ_ROOT / "models"
 
 # =============================================================================
 # DATA LIFECYCLE PATHS (MEDALLION ARCHITECTURE)
 # =============================================================================
 
-# Bronze Layer: Original CSV files from source
-RAW_DATA_PATH = DATA_DIR / "raw" / "tep-csv"
+# BRONZE LAYER: Raw source ingestion (Original CSV files)
+RAW_DATA_PATH: Path = DATA_DIR / "raw" / "tep-csv"
+RAW_CSV_FILES: list[str] = [
+    "TEP_FaultFree_Testing.csv",
+    "TEP_FaultFree_Training.csv",
+    "TEP_Faulty_Testing.csv",
+    "TEP_Faulty_Training.csv"
+]
 
-# Silver Layer: Cleaned Parquet files and consolidated master records
-PROCESSED_DATA_PATH = DATA_DIR / "processed"
-RAW_PARQUET_DIR = PROCESSED_DATA_PATH / "parquet"
-MERGED_FILE_PATH = RAW_PARQUET_DIR / "TEP_Faulty_and_Normal_Merged.parquet"
+# SILVER LAYER: Sanitized Parquet records and consolidated master datasets
+PROCESSED_DATA_PATH: Path = DATA_DIR / "processed"
+RAW_PARQUET_DIR: Path = PROCESSED_DATA_PATH / "parquet"
 
-# Gold Layer: Model-ready subsets and final evaluation splits
-SUBSETS_DIR = PROCESSED_DATA_PATH / "subsets"
-FINAL_SPLIT_DIR = PROCESSED_DATA_PATH / "final_split"
-FINAL_TEST_SET_PATH = FINAL_SPLIT_DIR / "test_set_final.parquet"
+# File references for merged master records
+FAULTY_TRAIN_FILENAME: str = "TEP_Faulty_Training.parquet"
+NORMAL_TRAIN_FILENAME: str = "TEP_FaultFree_Training.parquet"
+MERGED_FILE_PATH: Path = RAW_PARQUET_DIR / "TEP_Faulty_and_Normal_Merged.parquet"
+
+# GOLD LAYER: Model-ready subsets and final evaluation hold-out splits
+SUBSETS_DIR: Path = PROCESSED_DATA_PATH / "subsets"
+FINAL_SPLIT_DIR: Path = PROCESSED_DATA_PATH / "final_split"
+FINAL_TEST_SET_PATH: Path = FINAL_SPLIT_DIR / "test_set_final.parquet"
 
 # =============================================================================
-# NOMENCLATURE & REFRENCES
+# GLOBAL PIPELINE PARAMETERS
 # =============================================================================
 
-# Base filenames for training sets
-FAULTY_TRAIN_FILENAME = "TEP_Faulty_Training.parquet"
-NORMAL_TRAIN_FILENAME = "TEP_FaultFree_Training.parquet"
+# Reproducibility: Static seed for all stochastic processes (CV, RF, etc.)
+RANDOM_SEED: int = 42
 
-FAULTY_PARQUET_PATH = RAW_PARQUET_DIR / FAULTY_TRAIN_FILENAME
-NORMAL_PARQUET_PATH = RAW_PARQUET_DIR / NORMAL_TRAIN_FILENAME
+# Workload control: Limit simulations for rapid prototyping (None for full-scale)
+DEFAULT_N_SIMULATIONS: int = 10     # None for full-scale training (500 runs)
+
+# Validation strategy: Standard hold-out ratio
+DEFAULT_TEST_SIZE: float = 0.2      # 20% for testing, 80% for training
 
 # =============================================================================
-# SCHEMA & TYPE OPTIMIZATION
+# MODEL ARCHITECTURE & HYPERPARAMETERS
 # =============================================================================
 
-# Optimized schema to minimize RAM usage during large-scale data ingestion
-OPTIMIZED_DTYPES = {
+# Serialization references
+MODEL_DETECT_NAME: str = "detector_pipeline.joblib"
+MODEL_DIAG_NAME: str = "diagnostician_pipeline.joblib"
+
+# Phase 1: Detector (Binary Anomaly Detection)
+# Focused on high sensitivity to distinguish normal vs. abnormal states
+DETECTOR_PARAMS = {
+    "n_estimators": 50,
+    "max_depth": 10,
+    "class_weight": "balanced",
+    "n_jobs": -1,
+    "random_state": RANDOM_SEED
+}
+
+# Phase 2: Diagnostician (Multiclass Fault Classification)
+# Focused on granular fault identification using faulty-only samples
+DIAGNOSTICIAN_PARAMS = {
+    "n_estimators": 100,
+    "max_depth": 20,
+    "class_weight": "balanced",
+    "n_jobs": -1,
+    "random_state": RANDOM_SEED
+}
+
+# =============================================================================
+# MEMORY & SCHEMA OPTIMIZATION
+# =============================================================================
+
+# Downcasting schema to minimize RAM footprint during large-scale ingestion
+# Using float32 instead of float64 to reduce memory usage by 50%
+OPTIMIZED_DTYPES: dict[str, str] = {
     "faultNumber": "int8",
     "simulationRun": "int16",
     "sample": "int16"
 }
 
-# Sensor measurements: xmeas_1 to xmeas_41 (mapped to float32)
+# Sensor measurements (xmeas_1 to xmeas_41)
 for i in range(1, 42):
     OPTIMIZED_DTYPES[f"xmeas_{i}"] = "float32"
 
-# Manipulated variables: xmv_1 to xmv_11 (mapped to float32)
+# Manipulated variables (xmv_1 to xmv_11)
 for i in range(1, 12):
     OPTIMIZED_DTYPES[f"xmv_{i}"] = "float32"
-
-# =============================================================================
-# ETL REGISTRY
-# =============================================================================
-
-RAW_CSV_FILES = [
-    "TEP_FaultFree_Testing.csv", "TEP_FaultFree_Training.csv",
-    "TEP_Faulty_Testing.csv", "TEP_Faulty_Training.csv"
-]
 
 # =============================================================================
 # INFRASTRUCTURE INITIALIZATION
 # =============================================================================
 
-def initialize_filesystem():
-    """Ensures necessary project structure exists before execution."""
-    required_dirs = [
+def initialize_filesystem() -> None:
+    """
+    Ensures the project workspace structure exists before runtime.
+    Creates missing directories for artifacts, logs, and processed data.
+    """
+    target_dirs: list[Path] = [
         CONFIG_DIR,
         RAW_PARQUET_DIR,
         SUBSETS_DIR,
         FINAL_SPLIT_DIR,
-        MODELS_DIR,
+        MODEL_DIR,
         LOGS_DIR
     ]
-    for directory in required_dirs:
+    for directory in target_dirs:
         directory.mkdir(parents=True, exist_ok=True)
 
-# Execute initialization on module load
+# Auto-initialize project structure on module import
 initialize_filesystem()

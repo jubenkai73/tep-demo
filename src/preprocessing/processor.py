@@ -7,8 +7,8 @@ from src.config import (
     OPTIMIZED_DTYPES,
     RAW_CSV_FILES,
     MERGED_FILE_PATH,
-    FAULTY_PARQUET_PATH,
-    NORMAL_PARQUET_PATH
+    FAULTY_TRAIN_FILENAME,
+    NORMAL_TRAIN_FILENAME
 )
 
 
@@ -90,12 +90,15 @@ class DataProcessor:
             print(f"✅ Master record detected: {MERGED_FILE_PATH.name}")
             return pd.read_parquet(MERGED_FILE_PATH)
 
-        # Loading upstream artifacts via PyArrow engine
-        print(f"📖 Ingesting: {FAULTY_PARQUET_PATH.name}")
-        faulty_df: pd.DataFrame = pd.read_parquet(FAULTY_PARQUET_PATH)
+        faulty_path = RAW_PARQUET_DIR / FAULTY_TRAIN_FILENAME
+        normal_path = RAW_PARQUET_DIR / NORMAL_TRAIN_FILENAME
 
-        print(f"📖 Ingesting: {NORMAL_PARQUET_PATH.name}")
-        normal_df: pd.DataFrame = pd.read_parquet(NORMAL_PARQUET_PATH)
+        # Loading upstream artifacts via PyArrow engine
+        print(f"📖 Ingesting: {faulty_path.name}")
+        faulty_df: pd.DataFrame = pd.read_parquet(faulty_path)
+
+        print(f"📖 Ingesting: {normal_path.name}")
+        normal_df: pd.DataFrame = pd.read_parquet(normal_path)
 
         if normal_df.empty and faulty_df.empty:
             print("❌ Critical Error: Source dataframes are empty. Aborting merge.")
