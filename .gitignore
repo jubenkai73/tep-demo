@@ -12,6 +12,7 @@ __pycache__/
 *.pyd
 .mypy_cache/
 .ruff_cache/
+.vscode
 
 # --- Docker ---
 .docker/
@@ -34,6 +35,7 @@ data/models/*.txt
 !data/processed/.gitkeep
 models/*.joblib
 models/*.pkl
+models/*.h5
 data/
 
 # Data and Models
