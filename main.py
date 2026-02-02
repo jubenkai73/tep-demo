@@ -53,25 +53,10 @@ class MLPipeline:
 
         # Step 2: Optimization - Parquet provides better compression and schema enforcement
         print("\n▶ STEP 2: Convert CSV to Parquet (Memory-Efficient)")
-
-        for file_name in RAW_CSV_FILES:
-            # On prépare les chemins complets
-            input_csv = RAW_DATA_PATH / file_name
-            output_parquet = RAW_PARQUET_DIR / file_name.replace(".csv", ".parquet")
-
-            # On vérifie si le fichier existe déjà pour gagner du temps
-            if output_parquet.exists() and not self.processor.force_mode:
-                print(f"⏩ Skipping: {file_name} (already exists)")
-                continue
-
-            # ON DONNE LES ARGUMENTS ICI :
-            self.processor.convert_csv_to_parquet(
-                input_csv=str(input_csv),
-                output_parquet=str(output_parquet)
-            )
+        self.processor.convert_csv_to_parquet()
 
         # Step 3: Silver layer refinement (Applying business logic filters)
-        print("▶ STEP 3: Processing Silver Layer (Cropping Data Testing)")
+        print("▶ STEP 3: Processing Silver Layer")
         self.processor.process_silver_layer()
 
         # Step 4: Final Feature/Target set creation
