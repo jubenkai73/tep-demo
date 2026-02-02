@@ -18,7 +18,7 @@ services:
       - FORCE_REPROCESS=${FORCE:-false}
     networks:
       - tep-network
-    command: python main.py --force
+    command: python src/main.py --force
 
   # --- STEP 2: INFERENCE API (FastAPI) ---
   api:
