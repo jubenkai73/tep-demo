@@ -2,7 +2,7 @@
 VENV         := venv
 VENV_PYTHON  := $(VENV)/bin/python3
 VENV_PIP     := $(VENV)/bin/pip
-DOCKER       := docker-compose
+DOCKER       := docker compose
 FORCE        ?= false
 OS           := $(shell uname -s)
 
